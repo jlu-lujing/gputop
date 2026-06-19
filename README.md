@@ -1,30 +1,63 @@
 # gputop
 
-A GPU monitoring TUI written in Rust, inspired by `nvidia-smi`, `jtop`, and `nvitop`, styled after `htop`.
+A GPU monitoring TUI written in Rust, inspired by `gotop`, `nvidia-smi`, `nvitop`, and `jtop`.
 
-## Features (planned)
+![gputop screenshot](screenshot.png)
 
-- Real-time GPU utilization, memory usage, temperature, and power draw
-- Per-process GPU usage breakdown
-- Interactive process management (sort, filter, kill)
-- CPU / memory / load overview alongside GPU stats
-- Color-coded bars and gauges in htop style
-- Mouse support for scrolling and selection
-- Configurable refresh interval
-- Multi-GPU support
+## Installation
 
-## Getting Started
+### One-liner (recommended)
 
 ```bash
-cargo run
+curl -fsSL https://raw.githubusercontent.com/jlu-lujing/gputop/main/install.sh | bash
 ```
 
-## Dependencies
+### Manual install
 
-- [ratatui](https://github.com/ratatui-org/ratatui) — TUI framework
-- [crossterm](https://github.com/crossterm-rs/crossterm) — terminal backend
-- [nvml-wrapper](https://github.com/Cldfire/nvml-wrapper) — NVIDIA GPU management library
-- [sysinfo](https://github.com/GuillaumeGomez/sysinfo) — system information
+Download the binary from [Releases](https://github.com/jlu-lujing/gputop/releases):
+
+```bash
+# Download and extract
+curl -fsSL https://github.com/jlu-lujing/gputop/releases/latest/download/gputop-x86_64-unknown-linux-gnu.tar.gz \
+  | tar xz
+
+# Install
+sudo install -Dm755 gputop /usr/local/bin/gputop
+```
+
+### Build from source
+
+```bash
+cargo install --git https://github.com/jlu-lujing/gputop.git
+```
+
+**Requirements:**
+- Linux x86_64
+- NVIDIA GPU + NVIDIA driver (NVML)
+
+## Features
+
+- ✅ **Smooth RGB gradient bars** — 256-color interpolation, btop-style
+- ✅ **Sparkline history** — 90s GPU utilization trend
+- ✅ **GPU metrics** — temp, power, clocks, fan speed
+- ✅ **Per-process GPU usage** — PID, SM%, GPU memory
+- ✅ **Interactive process table** — sort, navigate, kill
+- ✅ **CPU overview** — total + per-core utilization bars
+- ✅ **Memory breakdown** — used / buffers / cached / free
+- ✅ **Multi-GPU support**
+- ✅ **Adaptive layout** — auto-adjusts to terminal size
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `q` / `Esc` | Quit |
+| `/` | Cycle sort: SM% → GPU-MEM → CPU% → PID |
+| `↑` / `↓` / `k` / `j` | Navigate processes |
+| `c` | SIGINT |
+| `t` | SIGTERM |
+| `K` | SIGKILL |
+| `e` | Clear error |
 
 ## License
 

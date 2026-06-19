@@ -4,3 +4,6 @@
 **/*.rej
 *.pdb
 Cargo.lock
+.superpowers/
+gputop
+gputop-*.tar.gz

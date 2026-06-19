@@ -3,10 +3,16 @@ name = "gputop"
 version = "0.1.0"
 edition = "2024"
 description = "A GPU monitoring TUI written in Rust, inspired by htop, nvitop, and jtop"
+license = "MIT"
 
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
-nvml-wrapper = { version = "0.11", features = ["chrono"] }
+nvml-wrapper = "0.11"
 sysinfo = "0.33"
 chrono = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
