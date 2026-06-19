@@ -30,7 +30,7 @@ if ! command -v nvidia-smi &>/dev/null; then
 fi
 
 # ── Download ───────────────────────────────────────────────────
-TAG="latest"
+TAG="v0.1.0"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}-x86_64-unknown-linux-gnu.tar.gz"
 
 info "Downloading ${BINARY} from GitHub Releases..."
