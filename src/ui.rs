@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Sparkline, Table, TableState, Wrap};
+use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::app::{App, SortColumn};
 
@@ -124,6 +124,72 @@ fn gradient_bar_line<'a>(
     Line::from(spans)
 }
 
+// ── Timeline line chart ──────────────────────────────────────
+/// Render a filled line chart (btop/gotop style) for GPU utilization history.
+/// Uses block characters (▁▂▃▄▅▆▇█) for smooth vertical boundaries with gradient coloring.
+fn render_timeline<'a>(
+    data: &[u64],
+    width: usize,
+    height: usize,
+    stops: &[(f64, Color)],
+) -> Vec<Line<'a>> {
+    if data.is_empty() || width < 2 || height < 1 {
+        return (0..height).map(|_| Line::from("")).collect();
+    }
+
+    let max_val = 100.0_f64; // percent scale — consistent
+    let data_len = data.len();
+
+    // Compute fill level per column in "eighths" across total chart height.
+    // E.g. height=3 → total_eighths=24, a 50% value fills 12 eighths from bottom.
+    let total_eighths = (height * 8) as f64;
+    let fill_eighths: Vec<f64> = (0..width)
+        .map(|col| {
+            let idx = if data_len >= width {
+                data_len - width + col
+            } else {
+                let frac = col as f64 / (width - 1).max(1) as f64;
+                ((data_len - 1) as f64 * frac) as usize
+            };
+            let val = data[idx.min(data_len - 1)] as f64;
+            (val / max_val) * total_eighths
+        })
+        .collect();
+
+    // Block chars: index 0 = empty, 1..8 = ▁..█
+    const BLOCK_CHARS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+    // Build chart rows from top (row=0) to bottom (row=height-1)
+    let mut lines = Vec::with_capacity(height);
+    for row in 0..height {
+        let mut spans = Vec::with_capacity(width);
+        for &fe in &fill_eighths {
+            // Row r spans eighths [(height-1-r)*8, (height-r)*8) from bottom.
+            let row_bottom = (height - 1 - row) * 8;
+            let row_top = row_bottom + 8;
+
+            if fe <= row_bottom as f64 {
+                // Fill entirely below this row → empty
+                spans.push(Span::raw(" "));
+            } else if fe >= row_top as f64 {
+                // Fill covers this entire row → solid block
+                let gradient_t = fe / total_eighths;
+                let color = sample_gradient(stops, gradient_t);
+                spans.push(Span::styled("█", Style::new().fg(color)));
+            } else {
+                // Partial fill at the vertical boundary
+                let partial = (fe - row_bottom as f64).round().clamp(1.0, 8.0) as u8;
+                let gradient_t = fe / total_eighths;
+                let color = sample_gradient(stops, gradient_t);
+                spans.push(Span::styled(BLOCK_CHARS[partial as usize].to_string(), Style::new().fg(color)));
+            }
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines
+}
+
 // ── Public API ─────────────────────────────────────────────────
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -133,23 +199,41 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_error_popup(frame, area, error);
     }
 
-    // Dynamic header height: calculate what's needed for all content
-    let gpu_rows = (app.gpu_data.len().max(1) * 3) as u16;
+    let gpu_count = app.gpu_data.len() as u16;
     let core_count = app.cpu_data.cores.len() as u16;
     // Ensure at least 5 rows for process table (3 data + 1 header + 1 border) + 2 for footer
     let max_header = area.height.saturating_sub(7);
 
     // Try 4 cores/row first — if it fits, use it; otherwise fall back to 8
     let core_rows_4 = (core_count + 3) / 4;
-    let needed_4 = gpu_rows + 1 + 1 + core_rows_4 + 1 + 2;
-    let cores_per_row = if needed_4 <= max_header {
+    let no_chart_needed = (gpu_count.max(1)) * 3 + 1 + 1 + core_rows_4 + 1 + 2;
+    let cores_per_row = if no_chart_needed <= max_header {
         4u16
     } else {
         8u16
     };
     let core_rows = (core_count + cores_per_row - 1) / cores_per_row;
+
+    // Compute available chart height per GPU (extra rows beyond 3-row base)
+    let base_needed = (gpu_count.max(1)) * 3 + 1 + 1 + core_rows + 1 + 2;
+    let extra_avail = max_header.saturating_sub(base_needed);
+    let gpu_count_for_chart = gpu_count.max(1);
+
+    // chart_height: 3 if lots of room, 2 if moderate, 1 if tight, 0 if no room
+    let chart_height = if gpu_count > 0 && extra_avail >= gpu_count_for_chart * 3 {
+        3u16
+    } else if gpu_count > 0 && extra_avail >= gpu_count_for_chart * 2 {
+        2u16
+    } else if gpu_count > 0 && extra_avail >= gpu_count_for_chart {
+        1u16
+    } else {
+        0u16
+    };
+
+    let gpu_rows = (gpu_count.max(1)) * (3 + chart_height);
     let needed_height = gpu_rows + 1 + 1 + core_rows + 1 + 2;
-    let header_height = needed_height.clamp(8, max_header);
+    let min_header = 9u16.min(max_header);
+    let header_height = needed_height.clamp(min_header, max_header);
 
     let chunks = Layout::vertical([
         Constraint::Length(header_height),
@@ -158,7 +242,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     ])
     .split(area);
 
-    render_gpu_header(frame, app, chunks[0], gpu_rows, cores_per_row);
+    render_gpu_header(frame, app, chunks[0], gpu_rows, cores_per_row, chart_height);
     render_process_table(frame, app, chunks[1]);
     render_footer(frame, app, chunks[2]);
 }
@@ -186,7 +270,7 @@ fn render_error_popup(frame: &mut Frame, area: Rect, error: &str) {
 
 // ── GPU Header Section ─────────────────────────────────────────
 
-fn render_gpu_header(frame: &mut Frame, app: &App, area: Rect, gpu_rows: u16, cores_per_row: u16) {
+fn render_gpu_header(frame: &mut Frame, app: &App, area: Rect, gpu_rows: u16, cores_per_row: u16, chart_height: u16) {
     let time_str = crate::cpu::format_time();
     let uptime_str = crate::cpu::format_uptime();
     let title = format!(" GPU / CPU  {}  Uptime: {}", time_str, uptime_str);
@@ -204,11 +288,11 @@ fn render_gpu_header(frame: &mut Frame, app: &App, area: Rect, gpu_rows: u16, co
     ])
     .split(inner);
 
-    render_gpu_cards(frame, app, chunks[0]);
+    render_gpu_cards(frame, app, chunks[0], chart_height);
     render_cpu_section(frame, app, chunks[1], cores_per_row);
 }
 
-fn render_gpu_cards(frame: &mut Frame, app: &App, area: Rect) {
+fn render_gpu_cards(frame: &mut Frame, app: &App, area: Rect, chart_height: u16) {
     if app.gpu_data.is_empty() {
         frame.render_widget(
             Block::bordered()
@@ -227,14 +311,15 @@ fn render_gpu_cards(frame: &mut Frame, app: &App, area: Rect) {
 
     let gpu_stops = gpu_gradient_stops();
     let mem_stops = mem_gradient_stops();
+    let per_gpu_rows = 3 + chart_height;
 
     for (i, gpu) in app.gpu_data.iter().enumerate() {
-        let y = area.y + (i as u16 * 3);
+        let y = area.y + (i as u16 * per_gpu_rows);
         let gpu_block = Rect {
             x: area.x,
             y,
             width: area.width,
-            height: 3,
+            height: per_gpu_rows,
         };
 
         // ── Row 1: Two gradient bars side by side ──
@@ -321,7 +406,7 @@ fn render_gpu_cards(frame: &mut Frame, app: &App, area: Rect) {
         let gpu_name_len = gpu.name.len();
         let full_name_len = name_prefix.len() + gpu_name_len;
 
-        // Calculate widths for each fold level (now with mem_seg)
+        // Calculate widths for each fold level
         let level1 = full_name_len + sep_len * 5 + temp_seg.len() + pwr_seg.len() + fan_seg.len() + clk_seg.len() + mem_seg.len();
         let short_name_len = name_prefix.len();
         let level2 = short_name_len + sep_len * 5 + temp_seg.len() + pwr_seg.len() + fan_seg.len() + clk_seg.len() + mem_seg.len();
@@ -368,21 +453,19 @@ fn render_gpu_cards(frame: &mut Frame, app: &App, area: Rect) {
         };
         frame.render_widget(info, info_area);
 
-        // ── Row 3: Sparkline ──
-        let spark_y = info_y + 1;
-        if spark_y < gpu_block.y + 3 && i < app.gpu_util_history.len() {
-            let spark_area = Rect {
+        // ── Rows 3+: Timeline chart ──
+        let chart_y = info_y + 1;
+        if chart_y < gpu_block.y + per_gpu_rows && chart_height > 0 && i < app.gpu_util_history.len() {
+            let chart_area = Rect {
                 x: area.x + 1,
-                y: spark_y,
+                y: chart_y,
                 width: area.width.saturating_sub(2),
-                height: 1,
+                height: chart_height,
             };
             let hist = &app.gpu_util_history[i];
-            if !hist.is_empty() {
-                let spark = Sparkline::default()
-                    .data(hist)
-                    .style(Style::new().fg(CYAN));
-                frame.render_widget(spark, spark_area);
+            if !hist.is_empty() && chart_area.width > 5 {
+                let lines = render_timeline(hist, chart_area.width as usize, chart_height as usize, &gpu_stops);
+                frame.render_widget(Paragraph::new(Text::from(lines)), chart_area);
             }
         }
     }
@@ -470,7 +553,6 @@ fn render_cpu_section(frame: &mut Frame, app: &App, area: Rect, cores_per_row: u
                     height: 1,
                 };
 
-                // Compact: "C02 ▓▓▓▓░░ 45%"
                 let bar_w = (cell_area.width as usize).saturating_sub(8);
                 let core_label = format!("C{:>2}", core.index);
                 let core_line = gradient_bar_line(
