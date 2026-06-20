@@ -26,6 +26,7 @@ pub struct MemBreakdown {
 pub struct CpuData {
     pub cores: Vec<CpuCoreData>,
     pub total_usage: f32,
+    pub cpu_temp_celsius: u32,
     pub mem: MemBreakdown,
     pub swap_total_mib: u64,
     pub swap_used_mib: u64,
@@ -36,6 +37,7 @@ impl Default for CpuData {
         Self {
             cores: Vec::new(),
             total_usage: 0.0,
+            cpu_temp_celsius: 0,
             mem: MemBreakdown::default(),
             swap_total_mib: 0,
             swap_used_mib: 0,
@@ -53,6 +55,31 @@ impl Default for MemBreakdown {
             free_mib: 0,
         }
     }
+}
+
+/// Read CPU temperature from /sys/class/hwmon/hwmon*/temp1_input.
+/// Tries k10temp first (AMD), falls back to the first hwmon with a temp1_input.
+/// Returns 0 if no sensor is found.
+fn read_cpu_temp() -> u32 {
+    // AMD k10temp is the most common hwmon for AMD CPUs
+    let k10temp = "/sys/class/hwmon/hwmon2/temp1_input";
+    if let Ok(content) = std::fs::read_to_string(k10temp) {
+        if let Ok(millidegrees) = content.trim().parse::<u64>() {
+            return (millidegrees / 1000) as u32;
+        }
+    }
+    // Fallback: scan all hwmon devices
+    if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") {
+        for entry in entries.flatten() {
+            let temp_path = entry.path().join("temp1_input");
+            if let Ok(content) = std::fs::read_to_string(&temp_path) {
+                if let Ok(millidegrees) = content.trim().parse::<u64>() {
+                    return (millidegrees / 1000) as u32;
+                }
+            }
+        }
+    }
+    0
 }
 
 /// Parse /proc/meminfo for memory breakdown (btop style)
@@ -129,6 +156,7 @@ impl CpuCollector {
             .collect();
 
         let total_usage = self.sys.global_cpu_usage();
+        let cpu_temp_celsius = read_cpu_temp();
         let mem = read_meminfo();
         let swap_total_mib = self.sys.total_swap() / 1024 / 1024;
         let swap_used_mib = (self.sys.total_swap() - self.sys.free_swap()) / 1024 / 1024;
@@ -136,6 +164,7 @@ impl CpuCollector {
         Ok(CpuData {
             cores,
             total_usage,
+            cpu_temp_celsius,
             mem,
             swap_total_mib,
             swap_used_mib,

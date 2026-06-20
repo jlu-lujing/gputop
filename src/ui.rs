@@ -124,6 +124,30 @@ fn gradient_bar_line<'a>(
     Line::from(spans)
 }
 
+/// Single-color bar line: label + bar + percentage (used for compact 8-per-row mode)
+fn solid_bar_line<'a>(
+    label: &'a str,
+    percent: u32,
+    width: usize,
+    color: Color,
+    _empty_color: Color,
+) -> Line<'a> {
+    let filled = (percent as f64 / 100.0 * width as f64).round() as usize;
+    let mut spans = vec![Span::styled(label, Style::new().bold().fg(WHITE))];
+    for i in 0..width {
+        if i < filled {
+            spans.push(Span::styled("█", Style::new().fg(color)));
+        } else {
+            spans.push(Span::raw(" "));
+        }
+    }
+    spans.push(Span::styled(
+        format!(" {:3}% ", percent),
+        Style::new().fg(WHITE),
+    ));
+    Line::from(spans)
+}
+
 // ── Timeline line chart ──────────────────────────────────────
 /// Render a filled line chart (btop/gotop style) for GPU utilization history.
 /// Uses block characters (▁▂▃▄▅▆▇█) for smooth vertical boundaries with gradient coloring.
@@ -478,10 +502,25 @@ fn render_cpu_section(frame: &mut Frame, app: &App, area: Rect, cores_per_row: u
         return;
     }
 
-    let title = Line::from(Span::styled(
-        " CPU / MEM ",
-        Style::new().bold().fg(CYAN),
-    ));
+    // CPU temp in section title
+    let cpu_temp = app.cpu_data.cpu_temp_celsius;
+    let temp_color = if cpu_temp >= 85 {
+        RED
+    } else if cpu_temp >= 75 {
+        ORANGE
+    } else if cpu_temp >= 60 {
+        YELLOW
+    } else {
+        GREEN
+    };
+    let title = if cpu_temp > 0 {
+        Line::from(vec![
+            Span::styled(" CPU / MEM  ", Style::new().bold().fg(CYAN)),
+            Span::styled(format!("{}°C ", cpu_temp), Style::new().bold().fg(temp_color)),
+        ])
+    } else {
+        Line::from(Span::styled(" CPU / MEM ", Style::new().bold().fg(CYAN)))
+    };
     frame.render_widget(
         title,
         Rect {
@@ -555,14 +594,22 @@ fn render_cpu_section(frame: &mut Frame, app: &App, area: Rect, cores_per_row: u
 
                 let bar_w = (cell_area.width as usize).saturating_sub(8);
                 let core_label = format!("C{:>2}", core.index);
-                let core_line = gradient_bar_line(
-                    &core_label,
-                    core.usage_percent as u32,
-                    bar_w,
-                    &gpu_stops,
-                    DIM,
-                );
-                frame.render_widget(Paragraph::new(core_line), cell_area);
+                if bar_w < 6 {
+                    // Narrow bar: single color (gradient would be invisible at this width)
+                    let percent = core.usage_percent as u32;
+                    let color = gauge_fg(percent).fg.unwrap_or(WHITE);
+                    let line = solid_bar_line(&core_label, percent, bar_w, color, DIM);
+                    frame.render_widget(Paragraph::new(line), cell_area);
+                } else {
+                    let core_line = gradient_bar_line(
+                        &core_label,
+                        core.usage_percent as u32,
+                        bar_w,
+                        &gpu_stops,
+                        DIM,
+                    );
+                    frame.render_widget(Paragraph::new(core_line), cell_area);
+                }
             }
             y += 1;
         }
