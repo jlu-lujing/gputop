@@ -1,6 +1,6 @@
 [package]
 name = "gputop"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "A GPU monitoring TUI written in Rust, inspired by htop, nvitop, and jtop"
 license = "MIT"

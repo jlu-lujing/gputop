@@ -654,10 +654,11 @@ fn render_cpu_section(frame: &mut Frame, app: &App, area: Rect, cores_per_row: u
                 spans.push(Span::raw(" "));
             }
 
-            // Legend
+                        // Legend
             spans.push(Span::styled(
                 format!(
-                    " U:{}G B:{}G C:{}G F:{}G",
+                    " Total:{}G Used:{}G Buffers:{}G Cached:{}G Free:{}G",
+                    (mem.total_mib as f64 / 1024.0 * 10.0).round() / 10.0,
                     (mem.used_mib as f64 / 1024.0 * 10.0).round() / 10.0,
                     (mem.buffers_mib as f64 / 1024.0 * 10.0).round() / 10.0,
                     (mem.cached_mib as f64 / 1024.0 * 10.0).round() / 10.0,
