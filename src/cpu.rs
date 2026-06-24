@@ -57,24 +57,69 @@ impl Default for MemBreakdown {
     }
 }
 
-/// Read CPU temperature from /sys/class/hwmon/hwmon*/temp1_input.
-/// Tries k10temp first (AMD), falls back to the first hwmon with a temp1_input.
+/// Read CPU temperature from /sys/class/hwmon.
+/// Scans all hwmon devices and matches by label:
+///   Tctl > CPUTIN > Composite > SYSTIN > first temp*_input
 /// Returns 0 if no sensor is found.
 fn read_cpu_temp() -> u32 {
-    // AMD k10temp is the most common hwmon for AMD CPUs
-    let k10temp = "/sys/class/hwmon/hwmon2/temp1_input";
-    if let Ok(content) = std::fs::read_to_string(k10temp) {
-        if let Ok(millidegrees) = content.trim().parse::<u64>() {
-            return (millidegrees / 1000) as u32;
+    let hwmon = "/sys/class/hwmon";
+    let entries: Vec<_> = std::fs::read_dir(hwmon)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+
+    // Priority-ordered label prefixes to match
+    let priorities = ["Tctl", "CPUTIN", "Composite", "SYSTIN"];
+
+    for label in &priorities {
+        for entry in &entries {
+            let dir_path = entry.path();
+            let temp_entries: Vec<_> = std::fs::read_dir(&dir_path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .collect();
+            for temp_entry in &temp_entries {
+                let name = temp_entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with("temp") || !name.ends_with("_input") {
+                    continue;
+                }
+                // Check if this hwmon has a matching label
+                let label_file = temp_entry.path().with_extension("label");
+                if let Ok(l) = std::fs::read_to_string(&label_file) {
+                    if l.trim() == *label {
+                        let path = temp_entry.path();
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            if let Ok(millidegrees) = content.trim().parse::<u64>() {
+                                if millidegrees > 0 {
+                                    return (millidegrees / 1000) as u32;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    // Fallback: scan all hwmon devices
-    if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") {
-        for entry in entries.flatten() {
-            let temp_path = entry.path().join("temp1_input");
-            if let Ok(content) = std::fs::read_to_string(&temp_path) {
-                if let Ok(millidegrees) = content.trim().parse::<u64>() {
-                    return (millidegrees / 1000) as u32;
+
+    // Fallback: first non-zero temp*_input
+    for entry in &entries {
+        let dir_path = entry.path();
+        let temp_entries: Vec<_> = std::fs::read_dir(&dir_path)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .collect();
+        for temp_entry in &temp_entries {
+            let name = temp_entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("temp") && name.ends_with("_input") {
+                if let Ok(content) = std::fs::read_to_string(&temp_entry.path()) {
+                    if let Ok(millidegrees) = content.trim().parse::<u64>() {
+                        if millidegrees > 0 {
+                            return (millidegrees / 1000) as u32;
+                        }
+                    }
                 }
             }
         }
