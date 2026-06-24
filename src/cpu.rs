@@ -86,7 +86,9 @@ fn read_cpu_temp() -> u32 {
                     continue;
                 }
                 // Check if this hwmon has a matching label
-                let label_file = temp_entry.path().with_extension("label");
+                // temp1_input → temp1_label (replace _input with _label)
+                let label_name = name.replace("_input", "_label");
+                let label_file = dir_path.join(&label_name);
                 if let Ok(l) = std::fs::read_to_string(&label_file) {
                     if l.trim() == *label {
                         let path = temp_entry.path();
